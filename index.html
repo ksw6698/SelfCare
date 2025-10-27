@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>필드테스트 피드백 수집</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); }
+        h1 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; text-align: center; }
+        .section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 6px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="file"], textarea, select { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .score-radio { display: flex; justify-content: space-around; margin-top: 10px; }
+        .score-radio label { font-weight: normal; }
+        .guide-image { max-width: 100%; height: auto; margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        #loading { text-align: center; font-size: 1.2em; color: #007bff; display: none; }
+        .error { color: red; font-weight: bold; text-align: center; margin-top: 10px; }
+        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .start-screen { text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 id="app-title">...로딩 중...</h1>
+
+        <div id="start-screen" class="start-screen">
+            <h2>테스트 사용자 선택</h2>
+            <p>본인의 ID를 선택하고 시작 버튼을 눌러주세요.</p>
+            <select id="user-select">
+                </select>
+            <button onclick="startTest()">테스트 시작</button>
+            <p id="start-error" class="error"></p>
+        </div>
+
+        <form id="feedback-form" style="display: none;">
+            <input type="hidden" id="selected-user-id">
+
+            <div id="photo-sections">
+                </div>
+
+            <div class="section">
+                <h2>5. 전체 만족도 및 피드백</h2>
+                <div style="margin-bottom: 15px;">
+                    <label>전체 만족도 점수 (1~5점)</label>
+                    <div class="score-radio">
+                        <label><input type="radio" name="score_overall" value="1" required> 1 (매우 불만족)</label>
+                        <label><input type="radio" name="score_overall" value="2"> 2</label>
+                        <label><input type="radio" name="score_overall" value="3"> 3 (보통)</label>
+                        <label><input type="radio" name="score_overall" value="4"> 4</label>
+                        <label><input type="radio" name="score_overall" value="5"> 5 (매우 만족)</label>
+                    </div>
+                </div>
+
+                <label>점검 방법 용이성 피드백</label>
+                <textarea name="feedback_easy" rows="3" placeholder="점검 방법이 얼마나 쉬웠는지 의견을 작성해주세요." required></textarea>
+
+                <label>난이도 관련 피드백</label>
+                <textarea name="feedback_difficulty" rows="3" placeholder="점검 난이도에 대한 의견을 작성해주세요." required></textarea>
+
+                <label>위생 상태 관련 정성적 피드백</label>
+                <textarea name="feedback_sanitation" rows="3" placeholder="각 항목의 위생 상태에 대한 추가 의견을 자유롭게 작성해주세요." required></textarea>
+            </div>
+
+            <div id="loading" style="display: none;">데이터 전송 중... 잠시만 기다려 주세요.</div>
+            <p id="submission-error" class="error"></p>
+            <button type="submit" id="submit-btn">피드백 제출하기</button>
+        </form>
+
+    </div>
+
+    <script>
+        // --- ⚙️ 설정 변수 (GAS URL로 반드시 수정하세요!) ---
+        const GAS_WEBAPP_URL = '여기에_당신의_배포된_GAS_웹앱_URL을_붙여넣으세요/exec';
+        // ----------------------------------------
+        
+        let CMS_DATA = {}; // CMS 데이터를 저장할 전역 변수
+
+        // DOM 로드 시 CMS 데이터 로드 및 초기 화면 구성
+        document.addEventListener('DOMContentLoaded', fetchCMSData);
+
+        // --- CMS 데이터 로드 (GAS를 API처럼 호출) ---
+        async function fetchCMSData() {
+            try {
+                // GAS getCMSData 함수를 호출하는 URL 구성
+                const url = GAS_WEBAPP_URL.replace('/exec', '/dev'); // /dev를 사용하여 최신 스크립트 실행
+                const response = await fetch(url + '?action=getCMS', { method: 'GET' });
+                
+                if (!response.ok) throw new Error('Failed to fetch CMS data from GAS.');
+
+                // GAS가 HTML Service가 아닌 ContentService로 JSON을 반환한다고 가정
+                const responseText = await response.text();
+                // GAS에서 ContentService로 JSON을 반환하면 클라이언트에서 직접 eval 대신 JSON.parse 사용
+                const data = JSON.parse(responseText); 
+                
+                CMS_DATA = data;
+                document.getElementById('app-title').textContent = CMS_DATA.Title || '필드테스트 피드백';
+                
+                populateUserSelect();
+                createPhotoSections();
+            } catch (error) {
+                console.error("CMS 데이터 로드 실패:", error);
+                document.getElementById('app-title').textContent = '데이터 로드 오류. 새로고침 해주세요.';
+                document.getElementById('start-error').textContent = '콘텐츠 로드 중 오류 발생: ' + error.message;
+            }
+        }
+
+        // --- 사용자 목록 드롭다운 채우기 (U-3.0) ---
+        function populateUserSelect() {
+            const userSelect = document.getElementById('user-select');
+            userSelect.innerHTML = '<option value="">-- 사용자 선택 --</option>';
+            if (CMS_DATA.User_List && CMS_DATA.User_List.length > 0) {
+                CMS_DATA.User_List.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user;
+                    option.textContent = user;
+                    userSelect.appendChild(option);
+                });
+            } else {
+                document.getElementById('start-error').textContent = 'CMS에 사용자 목록(User_List)이 없습니다.';
+            }
+        }
+        
+        // --- 항목별 사진 및 점수 섹션 동적 생성 (U-3.1, U-3.2, U-3.3) ---
+        function createPhotoSections() {
+            const container = document.getElementById('photo-sections');
+            container.innerHTML = '';
+            for (let i = 1; i <= 4; i++) {
+                const item = CMS_DATA['Item_' + i];
+                if (!item) continue;
+                
+                const sectionHtml = `
+                    <div class="section">
+                        <h2>${i}. ${item.name}</h2>
+                        <label>촬영 예시 이미지 (가이드)</label>
+                        ${item.guideURL ? `<img src="${item.guideURL}" alt="${item.name} 촬영 가이드" class="guide-image">` : `<p>촬영 가이드 이미지가 없습니다.</p>`}
+                        
+                        <label for="image_${i}">사진 촬영/업로드 (필수)</label>
+                        <input type="file" id="image_${i}" name="image_${i}" accept="image/*" required>
+                        
+                        <div style="margin-top: 15px;">
+                            <label>위생도 점수 (1~5점)</label>
+                            <div class="score-radio">
+                                <label><input type="radio" name="score_${i}" value="1" required> 1 (불량)</label>
+                                <label><input type="radio" name="score_${i}" value="2"> 2</label>
+                                <label><input type="radio" name="score_${i}" value="3"> 3 (보통)</label>
+                                <label><input type="radio" name="score_${i}" value="4"> 4</label>
+                                <label><input type="radio" name="score_${i}" value="5"> 5 (최상)</label>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += sectionHtml;
+            }
+        }
+
+        // --- 테스트 시작 (사용자 ID 설정) ---
+        function startTest() {
+            const userSelect = document.getElementById('user-select');
+            const selectedUser = userSelect.value;
+            const startScreen = document.getElementById('start-screen');
+            const feedbackForm = document.getElementById('feedback-form');
+
+            if (!selectedUser) {
+                document.getElementById('start-error').textContent = '사용자를 선택해주세요.';
+                return;
+            }
+
+            document.getElementById('selected-user-id').value = selectedUser;
+            startScreen.style.display = 'none';
+            feedbackForm.style.display = 'block';
+            document.getElementById('app-title').textContent = `${selectedUser} 님 피드백 입력`;
+        }
+
+        // --- 폼 제출 핸들러 ---
+        document.getElementById('feedback-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const submitBtn = document.getElementById('submit-btn');
+            const loadingDiv = document.getElementById('loading');
+            const errorDiv = document.getElementById('submission-error');
+
+            submitBtn.disabled = true;
+            loadingDiv.style.display = 'block';
+            errorDiv.textContent = '';
+
+            const formData = {
+                userID: document.getElementById('selected-user-id').value,
+                score_1: form.elements.score_1.value,
+                score_2: form.elements.score_2.value,
+                score_3: form.elements.score_3.value,
+                score_4: form.elements.score_4.value,
+                score_overall: form.elements.score_overall.value,
+                feedback_easy: form.elements.feedback_easy.value,
+                feedback_difficulty: form.elements.feedback_difficulty.value,
+                feedback_sanitation: form.elements.feedback_sanitation.value,
+            };
+
+            // 파일 처리: Base64 인코딩
+            const fileInputs = [
+                form.elements.image_1.files[0],
+                form.elements.image_2.files[0],
+                form.elements.image_3.files[0],
+                form.elements.image_4.files[0]
+            ];
+
+            try {
+                const imagePromises = fileInputs.map((file, index) => {
+                    return new Promise((resolve, reject) => {
+                        if (!file) {
+                            formData['image_' + (index + 1)] = null;
+                            return resolve();
+                        }
+                        const reader = new FileReader();
+                        reader.onload = function(event) {
+                            const base64 = event.target.result.split(',')[1];
+                            formData['image_' + (index + 1)] = {
+                                data: base64,
+                                mimeType: file.type,
+                                filename: `${formData.userID}_Item${index + 1}_${Date.now()}.${file.name.split('.').pop()}`
+                            };
+                            resolve();
+                        };
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                });
+
+                await Promise.all(imagePromises);
+
+                // --- GAS로 데이터 전송 (POST) ---
+                const response = await fetch(GAS_WEBAPP_URL, {
+                    method: 'POST',
+                    mode: 'cors', 
+                    cache: 'no-cache',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded' // JSON 대신 폼 데이터 형태로 처리 (GAS doPost에 맞춤)
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✅ 피드백이 성공적으로 제출되었습니다. 감사합니다!');
+                    form.reset();
+                    // 제출 후 초기 화면으로 돌아가기
+                    document.getElementById('start-screen').style.display = 'block';
+                    document.getElementById('feedback-form').style.display = 'none';
+                    document.getElementById('app-title').textContent = CMS_DATA.Title;
+                } else {
+                    errorDiv.textContent = '❌ 제출 실패: ' + result.message;
+                }
+
+            } catch (error) {
+                console.error("Submission Error:", error);
+                errorDiv.textContent = '❌ 심각한 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+            } finally {
+                loadingDiv.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+
+</body>
+</html>
